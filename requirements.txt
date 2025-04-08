@@ -1,2 +1,5 @@
-openai
 streamlit
+openai
+pytesseract
+pdf2image
+Pillow
