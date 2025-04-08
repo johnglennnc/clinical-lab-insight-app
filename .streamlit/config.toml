@@ -1,6 +1,6 @@
 [server]
-enableXsrfProtection = false
-enableCORS = false
 headless = true
 port = 8501
-allowEmbedding = true
+enableCORS = false
+enableXsrfProtection = false
+allowEmbed = true
