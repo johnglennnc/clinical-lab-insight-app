@@ -28,7 +28,8 @@ if uploaded_file is not None:
                     model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
                     messages=[
                         {"role": "system", "content": "You are a functional medicine clinical lab specialist."},
-                        {"role": "user", "content": f"Here is a lab report:
+   {"role": "user", "content": f"""Here is a lab report:
+{lab_text}"""}
 
 {extracted_text}"}
                     ],
