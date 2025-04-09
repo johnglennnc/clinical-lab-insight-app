@@ -3,9 +3,7 @@ import openai
 import tempfile
 import os
 import json
-from pdf2image import convert_from_path
-import pytesseract
-from PIL import Image
+import fitz  # PyMuPDF
 
 # Secure API key loading
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -18,16 +16,16 @@ st.markdown("Upload a PDF lab report or paste text below to generate clinical re
 uploaded_file = st.file_uploader("📄 Upload PDF Lab Report", type="pdf")
 lab_text = st.text_area("✏️ Or paste lab report text here (optional)", height=300)
 
-# OCR extraction if PDF uploaded
+# PDF text extraction with PyMuPDF
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
         tmp_pdf.write(uploaded_file.read())
         tmp_pdf_path = tmp_pdf.name
 
-    images = convert_from_path(tmp_pdf_path, dpi=300)
-    extracted_text = ""
-    for image in images:
-        extracted_text += pytesseract.image_to_string(image)
+    with fitz.open(tmp_pdf_path) as doc:
+        extracted_text = ""
+        for page in doc:
+            extracted_text += page.get_text()
 
     os.remove(tmp_pdf_path)
     lab_text = extracted_text.strip()
@@ -61,3 +59,4 @@ if st.button("🔍 Generate Clinical Insights") and lab_text:
 
 elif st.button("🔁 Reset"):
     st.experimental_rerun()
+
