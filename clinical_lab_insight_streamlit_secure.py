@@ -1,42 +1,63 @@
-
 import streamlit as st
-import fitz  # PyMuPDF
 import openai
+import tempfile
 import os
+import json
+from pdf2image import convert_from_path
+import pytesseract
+from PIL import Image
 
-# Securely get the API key
+# Secure API key loading
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-st.title("Clinical Lab Insight (Powered by Fine-Tuned GPT)")
+# Title
+st.title("🧠 Clinical Lab Insight Generator (Fine-tuned Model)")
+st.markdown("Upload a PDF lab report or paste text below to generate clinical recommendations.")
 
-uploaded_file = st.file_uploader("Upload a lab report PDF", type="pdf")
-if uploaded_file is not None:
-    with open("temp.pdf", "wb") as f:
-        f.write(uploaded_file.read())
+# File upload
+uploaded_file = st.file_uploader("📄 Upload PDF Lab Report", type="pdf")
+lab_text = st.text_area("✏️ Or paste lab report text here (optional)", height=300)
 
-    doc = fitz.open("temp.pdf")
+# OCR extraction if PDF uploaded
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+        tmp_pdf.write(uploaded_file.read())
+        tmp_pdf_path = tmp_pdf.name
+
+    images = convert_from_path(tmp_pdf_path, dpi=300)
     extracted_text = ""
-    for page in doc:
-        extracted_text += page.get_text()
+    for image in images:
+        extracted_text += pytesseract.image_to_string(image)
 
-    st.text_area("Extracted Text", extracted_text)
+    os.remove(tmp_pdf_path)
+    lab_text = extracted_text.strip()
 
-    if st.button("Generate Clinical Insights") and extracted_text:
-        with st.spinner("Analyzing..."):
-            try:
-                response = openai.ChatCompletion.create(
-                    model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
-                    messages=[
-                        {"role": "system", "content": "You are a functional medicine clinical lab specialist."},
-   {"role": "user", "content": f"""Here is a lab report:
+# Submit button
+if st.button("🔍 Generate Clinical Insights") and lab_text:
+    with st.spinner("Generating insights..."):
+        try:
+            response = openai.chat.completions.create(
+                model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
+                messages=[
+                    {"role": "system", "content": "You are a clinical assistant trained on functional medicine lab interpretation. Respond only with structured JSON using Eric’s style."},
+                    {"role": "user", "content": f"""Here is a lab report:
 {lab_text}"""}
+                ],
+                temperature=0.3
+            )
 
-{extracted_text}"}
-                    ],
-                    temperature=0.7
-                )
-                content = response.choices[0].message.content
-                st.success("✅ Clinical recommendations generated.")
-                st.markdown(content)
-            except Exception as e:
-                st.error(f"❌ Error generating insights: {e}")
+            message_content = response.choices[0].message.content
+
+            try:
+                parsed = json.loads(message_content)
+                st.success("✅ Clinical recommendations generated:")
+                st.json(parsed)
+            except json.JSONDecodeError:
+                st.warning("⚠️ GPT response was not valid JSON. Here’s the raw output:")
+                st.text(message_content)
+
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+
+elif st.button("🔁 Reset"):
+    st.experimental_rerun()
