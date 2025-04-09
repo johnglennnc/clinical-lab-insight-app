@@ -1,62 +1,56 @@
 import streamlit as st
-import openai
 import tempfile
-import os
-import json
 import fitz  # PyMuPDF
+import openai
+import os
 
-# Secure API key loading
+# Set your OpenAI API key from environment variable
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Title
-st.title("🧠 Clinical Lab Insight Generator (Fine-tuned Model)")
-st.markdown("Upload a PDF lab report or paste text below to generate clinical recommendations.")
+st.set_page_config(page_title="Clinical Lab Insight AI", layout="centered")
+st.title("🧠 Clinical Lab Insight Generator")
 
-# File upload
-uploaded_file = st.file_uploader("📄 Upload PDF Lab Report", type="pdf")
-lab_text = st.text_area("✏️ Or paste lab report text here (optional)", height=300)
+uploaded_file = st.file_uploader("📄 Upload a lab report PDF", type=["pdf"])
+extracted_text = ""
 
-# PDF text extraction with PyMuPDF
-if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-        tmp_pdf.write(uploaded_file.read())
-        tmp_pdf_path = tmp_pdf.name
+if uploaded_file is not None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_pdf_path = tmp_file.name
 
-    with fitz.open(tmp_pdf_path) as doc:
-        extracted_text = ""
-        for page in doc:
-            extracted_text += page.get_text()
+    try:
+        with fitz.open(tmp_pdf_path) as doc:
+            for page in doc:
+                extracted_text += page.get_text()
+        st.success("✅ PDF text extraction complete!")
+    except Exception as e:
+        st.error(f"❌ Error extracting text from PDF: {e}")
 
-    os.remove(tmp_pdf_path)
-    lab_text = extracted_text.strip()
+if extracted_text:
+    st.subheader("📜 Extracted Lab Report Text")
+    st.text_area("Extracted Text", extracted_text, height=200)
 
-# Submit button
-if st.button("🔍 Generate Clinical Insights") and lab_text:
-    with st.spinner("Generating insights..."):
-        try:
-            response = openai.chat.completions.create(
-                model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
-                messages=[
-                    {"role": "system", "content": "You are a clinical assistant trained on functional medicine lab interpretation. Respond only with structured JSON using Eric’s style."},
-                    {"role": "user", "content": f"""Here is a lab report:
-{lab_text}"""}
-                ],
-                temperature=0.3
-            )
-
-            message_content = response.choices[0].message.content
-
+    if st.button("🤖 Generate Clinical Insight"):
+        with st.spinner("💬 Analyzing with fine-tuned GPT..."):
             try:
-                parsed = json.loads(message_content)
-                st.success("✅ Clinical recommendations generated:")
-                st.json(parsed)
-            except json.JSONDecodeError:
-                st.warning("⚠️ GPT response was not valid JSON. Here’s the raw output:")
-                st.text(message_content)
+                response = openai.ChatCompletion.create(
+                    model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an experienced functional medicine clinician named Eric. Based only on the provided lab report text, return a JSON with recommendations, hormones, ranges, and dosages in your own voice."
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Here is a lab report:\n{extracted_text}"
+                        }
+                    ],
+                    temperature=0.7
+                )
 
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+                output = response.choices[0].message.content
+                st.subheader("🧠 AI Clinical Insight")
+                st.code(output, language="json")
 
-elif st.button("🔁 Reset"):
-    st.experimental_rerun()
-
+            except Exception as e:
+                st.error(f"⚠️ Error generating insights: {e}")
