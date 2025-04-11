@@ -72,7 +72,7 @@ if uploaded_file:
         if st.button("🧠 Generate Clinical Insight"):
             try:
                 response = openai.ChatCompletion.create(
-                    model=MODEL_ID,
+                    model="ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2",
                     messages=[
                         {"role": "system", "content": "You are a medical assistant generating clinical recommendations."},
                         {"role": "user", "content": f"Here is a lab report:\n{extracted_text}\n\nReturn only a valid JSON with this structure:\n{{\n  \"Hormones\": [],\n  \"Ranges\": [],\n  \"Goals\": [],\n  \"Dosages\": [],\n  \"Recommendations\": []\n}}"}
