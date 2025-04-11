@@ -1,83 +1,97 @@
 import streamlit as st
-import os
 import tempfile
-import pytesseract
-from PIL import Image
+import os
 import fitz  # PyMuPDF
 import docx
 import openai
-import json
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Set your fine-tuned model ID here
 MODEL_ID = "ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2"
 
-st.set_page_config(page_title="Clinical Lab Insight")
-st.title("🧬 Clinical Lab Insight Generator")
+st.set_page_config(page_title="Clinical Lab Insight", layout="wide")
+st.title("🧪 Clinical Lab Insight")
+st.write("Upload a lab report (PDF, DOCX, or TXT), and get GPT-powered clinical recommendations.")
 
-uploaded_file = st.file_uploader("Upload your lab report (PDF, image, .txt, or .docx)", type=["pdf", "png", "jpg", "jpeg", "txt", "docx"])
+uploaded_file = st.file_uploader("Choose a file", type=["pdf", "docx", "txt"])
+extracted_text = ""
 
-def extract_text_from_file(file_path, file_type):
+def extract_text_from_pdf(file):
     try:
-        if file_type == "pdf":
-            text = ""
-            with fitz.open(file_path) as doc:
-                for page in doc:
-                    text += page.get_text()
-            return text.strip()
-        elif file_type in ["png", "jpg", "jpeg"]:
-            image = Image.open(file_path)
-            return pytesseract.image_to_string(image).strip()
-        elif file_type == "txt":
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        elif file_type == "docx":
-            doc = docx.Document(file_path)
-            return "\n".join([p.text for p in doc.paragraphs]).strip()
-        else:
-            return ""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_file.write(file.read())
+            tmp_path = tmp_file.name
+        with fitz.open(tmp_path) as doc:
+            return "\n".join([page.get_text() for page in doc])
     except Exception as e:
-        st.error(f"❌ Error extracting text from file: {e}")
+        st.error(f"❌ PDF extraction error: {e}")
         return ""
 
-if uploaded_file is not None:
+def extract_text_from_docx(file):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
+            tmp_file.write(file.read())
+            tmp_path = tmp_file.name
+        doc = docx.Document(tmp_path)
+        return "\n".join([para.text for para in doc.paragraphs])
+    except Exception as e:
+        st.error(f"❌ DOCX extraction error: {e}")
+        return ""
+
+def extract_text_from_txt(file):
+    try:
+        return file.read().decode("utf-8")
+    except Exception as e:
+        st.error(f"❌ TXT extraction error: {e}")
+        return ""
+
+if uploaded_file:
     st.success("✅ File uploaded successfully!")
+    file_type = uploaded_file.name.split(".")[-1].lower()
 
-    file_extension = uploaded_file.name.split(".")[-1].lower()
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
-
-    extracted_text = extract_text_from_file(tmp_path, file_extension)
-
-    if not extracted_text:
-        st.warning("⚠️ No text was extracted. Please upload a valid file.")
+    if file_type == "pdf":
+        extracted_text = extract_text_from_pdf(uploaded_file)
+    elif file_type == "docx":
+        extracted_text = extract_text_from_docx(uploaded_file)
+    elif file_type == "txt":
+        extracted_text = extract_text_from_txt(uploaded_file)
     else:
+        st.warning("⚠️ Unsupported file type.")
+
+    if extracted_text.strip():
         st.success("✅ Text extraction complete!")
 
-        if st.button("🧠 Generate Clinical Recommendations"):
-            with st.spinner("Consulting the fine-tuned model..."):
+        if st.button("🧠 Generate Clinical Insights"):
+            with st.spinner("Analyzing with GPT..."):
                 try:
-                    response = openai.ChatCompletion.create(
+                    client = openai.OpenAI()
+                    response = client.chat.completions.create(
                         model=MODEL_ID,
                         messages=[
-                            {"role": "system", "content": "You are a medical assistant generating clinical recommendations."},
+                            {
+                                "role": "system",
+                                "content": "You are a medical assistant generating clinical recommendations."
+                            },
                             {
                                 "role": "user",
-                                "content": f"Here is a lab report:\n{extracted_text}\n\nReturn only a valid JSON with this structure:\n{{\n  \"Hormones\": [],\n  \"Ranges\": [],\n  \"Goals\": [],\n  \"Dosages\": [],\n  \"Recommendations\": []\n}}"
+                                "content": f"""Here is a lab report:
+
+{extracted_text}
+
+Return only a valid JSON with this structure:
+{{
+  "Hormones": [],
+  "Ranges": [],
+  "Goals": [],
+  "Dosages": [],
+  "Recommendations": []
+}}"""
                             }
                         ]
                     )
-
                     output = response.choices[0].message.content
-
-                    try:
-                        parsed = json.loads(output)
-                        st.subheader("📋 Clinical Recommendations (Structured):")
-                        st.json(parsed)
-                    except json.JSONDecodeError:
-                        st.warning("⚠️ GPT response was not valid JSON. Here’s the raw output:")
-                        st.text(output)
-
+                    st.subheader("🧬 GPT Clinical Recommendations")
+                    st.code(output, language="json")
                 except Exception as e:
-                    st.error(f"❌ Error during GPT call: {e}")
+                    st.error(f"❌ Error during GPT call:\n\n{e}")
+    else:
+        st.warning("⚠️ No text was extracted. Please upload a valid file.")
