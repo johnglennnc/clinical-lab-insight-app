@@ -1,9 +1,10 @@
 import streamlit as st
 import os
 import tempfile
-import fitz  # PyMuPDF
+import fitz  # pymupdf
 from PIL import Image
 import pytesseract
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 import openai
 
 # Use environment variable for security
