@@ -1,84 +1,86 @@
 import streamlit as st
-import fitz  # PyMuPDF
-import pytesseract
-from PIL import Image
-import tempfile
 import os
-from openai import OpenAI
+import tempfile
+import fitz  # PyMuPDF
+from PIL import Image
+import pytesseract
+import openai
 
-# Initialize OpenAI with fine-tuned model
-client = OpenAI()
-fine_tuned_model = "ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2"
+# Use environment variable for security
+openai.api_key = os.getenv("OPENAI_API_KEY")
+MODEL_ID = "ft:gpt-3.5-turbo-0125:the-bad-company-holdings-llc::BKB3w2h2"
 
-st.title("🧠 Clinical Lab Insight Engine")
-st.markdown("Upload a lab report file (PDF, TXT, or Image), and receive clinical insights in Eric's interpretation style.")
+st.set_page_config(page_title="Clinical Lab Insight", layout="wide")
+st.title("🧠 Clinical Lab Insight Generator")
+st.markdown("Upload a **lab report** as a PDF, image, or TXT file to receive structured clinical insights.")
 
-uploaded_file = st.file_uploader("📄 Upload your file", type=["pdf", "txt", "png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("📤 Upload a lab report", type=["pdf", "png", "jpg", "jpeg", "txt"])
 
-lab_text = ""
+extracted_text = ""
 
 def extract_text_from_pdf(pdf_path):
+    text = ""
     try:
         with fitz.open(pdf_path) as doc:
-            return "\n".join(page.get_text() for page in doc)
+            for page in doc:
+                page_text = page.get_text().strip()
+                if not page_text:
+                    # Fallback to OCR if page is image-based
+                    pix = page.get_pixmap(dpi=300)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    page_text = pytesseract.image_to_string(img)
+                text += page_text + "\n"
     except Exception as e:
-        st.error(f"❌ PDF extraction error: {e}")
+        st.error(f"❌ PDF extraction error: {str(e)}")
+    return text.strip()
+
+def extract_text_from_image(image):
+    try:
+        return pytesseract.image_to_string(image).strip()
+    except Exception as e:
+        st.error(f"❌ Image extraction error: {str(e)}")
         return ""
 
-def extract_text_from_image(img_path):
+def read_txt_file(txt_file):
     try:
-        image = Image.open(img_path)
-        return pytesseract.image_to_string(image)
+        return txt_file.read().decode("utf-8").strip()
     except Exception as e:
-        st.error(f"❌ OCR error: {e}")
+        st.error(f"❌ Text file read error: {str(e)}")
         return ""
 
 if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
+    file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_file_path = tmp_file.name
 
-    file_type = uploaded_file.type
+    st.success("✅ File uploaded successfully!")
 
-    if uploaded_file.name.endswith(".pdf"):
-        st.info("📄 Extracting text from PDF...")
-        lab_text = extract_text_from_pdf(tmp_path)
+    if file_ext == ".pdf":
+        extracted_text = extract_text_from_pdf(tmp_file_path)
+    elif file_ext in [".png", ".jpg", ".jpeg"]:
+        image = Image.open(tmp_file_path)
+        extracted_text = extract_text_from_image(image)
+    elif file_ext == ".txt":
+        extracted_text = read_txt_file(open(tmp_file_path, "rb"))
 
-    elif uploaded_file.name.endswith(".txt"):
-        st.info("📄 Reading text file...")
-        with open(tmp_path, "r", encoding="utf-8") as f:
-            lab_text = f.read()
+    if extracted_text:
+        st.success("✅ Text extraction complete!")
+        st.text_area("📄 Extracted Text", extracted_text, height=250)
 
-    elif uploaded_file.name.lower().endswith((".png", ".jpg", ".jpeg")):
-        st.info("🖼️ Extracting text from image...")
-        lab_text = extract_text_from_image(tmp_path)
-
-    else:
-        st.error("Unsupported file type.")
-
-    os.unlink(tmp_path)
-
-    if lab_text.strip():
-        st.success("✅ Text extracted! Ready to analyze.")
-        st.text_area("🧬 Extracted Lab Report", lab_text, height=250)
-
-        if st.button("🧠 Generate Clinical Insight", key="insight_button"):
-            with st.spinner("Thinking..."):
-                prompt = (
-                    f"Here is a lab report:\n\n{lab_text.strip()}\n\n"
-                    "Please extract the lab values, goals, hormones, dosages, and give clinical recommendations based on this in the same style as Eric."
-                    " Respond in JSON with these keys: `values`, `goals`, `hormones`, `dosages`, `recommendations`."
+        if st.button("🧠 Generate Clinical Insight"):
+            try:
+                response = openai.ChatCompletion.create(
+                    model=MODEL_ID,
+                    messages=[
+                        {"role": "system", "content": "You are a medical assistant generating clinical recommendations."},
+                        {"role": "user", "content": f"Here is a lab report:\n{extracted_text}\n\nReturn only a valid JSON with this structure:\n{{\n  \"Hormones\": [],\n  \"Ranges\": [],\n  \"Goals\": [],\n  \"Dosages\": [],\n  \"Recommendations\": []\n}}"}
+                    ]
                 )
-
-                try:
-                    response = client.chat.completions.create(
-                        model=fine_tuned_model,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    reply = response.choices[0].message.content
-                    st.success("✅ Clinical insight generated!")
-                    st.markdown(f"```json\n{reply}\n```")
-                except Exception as e:
-                    st.error(f"❌ Error from OpenAI: {e}")
+                output = response.choices[0].message.content
+                st.markdown("### 🧾 Clinical Recommendations")
+                st.code(output, language="json")
+            except Exception as e:
+                st.error(f"❌ OpenAI API error: {str(e)}")
     else:
         st.warning("⚠️ No text was extracted. Please upload a valid file.")
